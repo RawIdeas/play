@@ -6,6 +6,7 @@ import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBufferInputStream;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.*;
+import org.jboss.netty.handler.codec.frame.TooLongFrameException;
 import org.jboss.netty.handler.codec.http.*;
 import org.jboss.netty.handler.codec.http.websocketx.*;
 import org.jboss.netty.handler.stream.ChunkedFile;
@@ -174,10 +175,10 @@ public class PlayHandler extends SimpleChannelUpstreamHandler {
                 if (Play.mode == Play.Mode.DEV) {
                     Router.detectChanges(Play.ctxPath);
                 }
-                if (Play.mode == Play.Mode.PROD && staticPathsCache.containsKey(request.path)) {
+                if (Play.mode == Play.Mode.PROD && staticPathsCache.containsKey(request.domain + " " + request.method + " " + request.path)) {
                     RenderStatic rs = null;
                     synchronized (staticPathsCache) {
-                        rs = staticPathsCache.get(request.path);
+                        rs = staticPathsCache.get(request.domain + " " + request.method + " " + request.path);
                     }
                     serveStatic(rs, ctx, request, response, nettyRequest, event);
                     if (Logger.isTraceEnabled()) {
@@ -196,7 +197,7 @@ public class PlayHandler extends SimpleChannelUpstreamHandler {
             } catch (RenderStatic rs) {
                 if (Play.mode == Play.Mode.PROD) {
                     synchronized (staticPathsCache) {
-                        staticPathsCache.put(request.path, rs);
+                        staticPathsCache.put(request.domain + " " + request.method + " " + request.path, rs);
                     }
                 }
                 serveStatic(rs, ctx, request, response, nettyRequest, this.event);
@@ -316,6 +317,9 @@ public class PlayHandler extends SimpleChannelUpstreamHandler {
                 nettyResponse.setHeader(entry.getKey(), value);
             }
         }
+
+        nettyResponse.setHeader(DATE, Utils.getHttpDateFormatter().format(new Date()));
+
         Map<String, Http.Cookie> cookies = response.cookies;
 
         for (Http.Cookie cookie : cookies.values()) {
@@ -334,7 +338,7 @@ public class PlayHandler extends SimpleChannelUpstreamHandler {
             nettyResponse.addHeader(SET_COOKIE, encoder.encode());
         }
 
-        if (!response.headers.containsKey(CACHE_CONTROL) && !response.headers.containsKey(EXPIRES)) {
+        if (!response.headers.containsKey(CACHE_CONTROL) && !response.headers.containsKey(EXPIRES) && !(response.direct instanceof File)) {
             nettyResponse.setHeader(CACHE_CONTROL, "no-cache");
         }
 
@@ -654,6 +658,12 @@ public class PlayHandler extends SimpleChannelUpstreamHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
         try {
+            // If we get a TooLongFrameException, we got a request exceeding 8k.
+            // Log this, we can't call serve500()
+            Throwable t = e.getCause();
+            if (t instanceof TooLongFrameException) {
+                Logger.error("Request exceeds 8192 bytes");
+            }
             e.getChannel().close();
         } catch (Exception ex) {
         }
@@ -956,12 +966,15 @@ public class PlayHandler extends SimpleChannelUpstreamHandler {
         if (Play.mode == Play.Mode.DEV) {
             httpResponse.setHeader(CACHE_CONTROL, "no-cache");
         } else {
-            String maxAge = Play.configuration.getProperty("http.cacheControl", "3600");
-            if (maxAge.equals("0")) {
-                httpResponse.setHeader(CACHE_CONTROL, "no-cache");
-            } else {
-                httpResponse.setHeader(CACHE_CONTROL, "max-age=" + maxAge);
-            }
+			// Check if Cache-Control header is not set
+			if (httpResponse.getHeader(CACHE_CONTROL) == null) {
+            	String maxAge = Play.configuration.getProperty("http.cacheControl", "3600");
+            	if (maxAge.equals("0")) {
+               		httpResponse.setHeader(CACHE_CONTROL, "no-cache");
+            	} else {
+                	httpResponse.setHeader(CACHE_CONTROL, "max-age=" + maxAge);
+            	}
+			}
         }
         boolean useEtag = Play.configuration.getProperty("http.useETag", "true").equals("true");
         long last = file.lastModified();

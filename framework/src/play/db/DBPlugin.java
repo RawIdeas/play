@@ -39,7 +39,7 @@ public class DBPlugin extends PlayPlugin {
     @Override
     public boolean rawInvocation(Request request, Response response) throws Exception {
         if (Play.mode.isDev() && request.path.equals("/@db")) {
-            response.status = Http.StatusCode.MOVED;
+            response.status = Http.StatusCode.FOUND;
             String serverOptions[] = new String[] { };
 
             // For H2 embeded database, we'll also start the Web console
@@ -186,7 +186,9 @@ public class DBPlugin extends PlayPlugin {
         out.println("Jdbc url: " + datasource.getJdbcUrl());
         out.println("Jdbc driver: " + datasource.getDriverClass());
         out.println("Jdbc user: " + datasource.getUser());
-        out.println("Jdbc password: " + datasource.getPassword());
+	if (Play.mode.isDev()) {
+          out.println("Jdbc password: " + datasource.getPassword());
+        }
         out.println("Min pool size: " + datasource.getMinPoolSize());
         out.println("Max pool size: " + datasource.getMaxPoolSize());
         out.println("Initial pool size: " + datasource.getInitialPoolSize());

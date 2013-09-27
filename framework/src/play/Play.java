@@ -241,8 +241,13 @@ public class Play {
         }
 
         // Mode
-        mode = Mode.valueOf(configuration.getProperty("application.mode", "DEV").toUpperCase());
-        if (usePrecompiled || forceProd) {
+		try {
+        	mode = Mode.valueOf(configuration.getProperty("application.mode", "DEV").toUpperCase());
+		} catch (IllegalArgumentException e) {
+			Logger.error("Illegal mode '%s', use either prod or dev", configuration.getProperty("application.mode"));
+			fatalServerErrorOccurred();
+		}
+		if (usePrecompiled || forceProd) {
             mode = Mode.PROD;
         }
 
@@ -467,6 +472,8 @@ public class Play {
             if (mode == Mode.DEV) {
                 // Need a new classloader
                 classloader = new ApplicationClassloader();
+                // Put it in the current context for any code that relies on having it there
+                Thread.currentThread().setContextClassLoader(classloader);
                 // Reload plugins
                 pluginCollection.reloadApplicationPlugins();
 
